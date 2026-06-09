@@ -1,0 +1,11 @@
+#!/bin/bash
+
+sensor="imu";
+executeTime=5;
+
+cd ~/Engineering/Python/VSCode/sensorData;
+mkdir -p logs;
+
+LOG=logs/"${sensor}"_$(date +%Y%m%d_%H%M%S).csv;
+
+timeout --signal=INT "${executeTime}s" mpremote connect /dev/ttyACM0 run mpuData.py | tee -a "$LOG"
