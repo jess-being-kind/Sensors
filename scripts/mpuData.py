@@ -9,6 +9,8 @@ mpu6050 = 0x68  # Hex address for mpu6050
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=400000)           # GP6 = SDA, GP7 = SCL
 awake = i2c.scan()  # Check if MPU6050 is responding
 calibrate = True   # Set to True to perform calibration
+numSamples = 500
+rateSamples = 40    # sample rate in Hz
 
 numsteps = 500     # Number of readings to average for calibration [ms]
 scaleAccel = 16384  # Scale factor for accelerometer (assuming ±2g range)
@@ -26,8 +28,7 @@ else:
 i2c.writeto_mem(mpu6050, 0x6B, b'\x00')  # Set MPU6050 to wake mode by writing 0 to the power management register (0x6B)
 
 # Main loop to read and calibrate MPU6050 data
-while True: 
-
+for index in range(numSamples):
     timestamp = ticks_ms() / 1000  # Get current timestamp in seconds
     data = i2c.readfrom_mem(mpu6050, 0x3B, 14)  # Read 14 bytes of data starting from register 0x3B
     
@@ -82,11 +83,12 @@ while True:
     raw_temp = functions.s16(data[6], data[7])
     temp_c = raw_temp / 340 + 36.53
 
-    """ 
+ 
     print(
     f"{ticks_ms()},"
     f"{axC:.5f},{ayC:.5f},{azC:.5f},"
     f"{gxC:.5f},{gyC:.5f},{gzC:.5f},"
     f"{temp_c:.2f}"
-) """
-    sleep(.025)  # Delay to control the data output rate (40 Hz)
+    )
+
+    sleep(1/rateSamples)  # Delay to control the data output rate (40 Hz)

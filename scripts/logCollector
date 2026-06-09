@@ -1,11 +1,13 @@
 #!/bin/bash
+set -e
 
 sensor="imu";
-executeTime=5;
+executeScript="scripts/mpuData.py";
 
-cd ~/Engineering/Python/VSCode/sensorData;
+cd ~/Engineering/Python/VSCode/sensorData || exit 1
+pwd; ls -la;
 mkdir -p logs;
 
 LOG=logs/"${sensor}"_$(date +%Y%m%d_%H%M%S).csv;
 
-timeout --signal=INT "${executeTime}s" mpremote connect /dev/ttyACM0 run mpuData.py | tee -a "$LOG"
+mpremote connect /dev/ttyACM0 run "${executeScript}" | tee -a "$LOG"
