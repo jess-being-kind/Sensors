@@ -6,9 +6,9 @@ import os
 import importlib.util
 from time import sleep  
 
-root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-module_path = os.path.join(root_dir, "functions.py") # type: ignore | Construct the path to the functions.py module based on the root directory
-spec = importlib.util.spec_from_file_location("functions", module_path)
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # type: ignore 
+module_path = os.path.join(root_dir, "scripts/functions.py") # type: ignore | Construct the path to the functions.py module based on the root directory
+spec = importlib.util.spec_from_file_location("scripts/functions", module_path)
 main = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(main) # type: ignore | Import the s16 function from the Function module for converting raw data to signed integers
 
