@@ -6,7 +6,7 @@ import functions  # type: ignore | Import the s16 function for converting raw da
 # Define variables and initialize I2C communication with MPU6050:
 mpu6050 = 0x68  # Hex address for mpu6050
 
-i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=400000)           # GP6 = SDA, GP7 = SCL
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)           # GP6 = SDA, GP7 = SCL
 awake = i2c.scan()  # Check if MPU6050 is responding
 calibrate = True   # Set to True to perform calibration
 numSamples = 500
