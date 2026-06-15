@@ -1,13 +1,21 @@
 #!/bin/bash
 set -e
 
-sensor="imu";
-executeScript="scripts/mpuData.py";
-
+sensors=(imu dht11)
+scripts=(scripts/mpuData.py scripts/dht11Data.py)
 cd ~/Engineering/Python/VSCode/sensorData || exit 1
 pwd; ls -la;
 mkdir -p logs;
 
-LOG=logs/"${sensor}"_$(date +%Y%m%d_%H%M%S).csv;
 
-mpremote connect /dev/ttyACM0 run "${executeScript}" | tee -a "$LOG"
+for i in "${!sensors[@]}"; do
+    LOG=logs/"${sensors[$i]}"_$(date +%Y%m%d_%H%M%S).csv;
+    ls -la logs/;
+
+    sensor="${sensors[$i]}"
+    script="${scripts[$i]}"
+
+    mpremote connect /dev/ttyACM0 run "${scripts[$i]}" | tee -a "$LOG"
+    
+    
+done
