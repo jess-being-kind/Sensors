@@ -17,5 +17,4 @@ for i in "${!sensors[@]}"; do
 
     mpremote connect /dev/ttyACM0 run "${scripts[$i]}" | tee -a "$LOG"
     
-    
 done
