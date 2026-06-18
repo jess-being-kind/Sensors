@@ -1,16 +1,38 @@
-# This is a script to collect temperature + humidity data from a connected DHT11 module
+## This is a script to collect temperature + humidity data from a connected DHT11 module
 
+## Import needed modules/libraries
 import gc
+import sys
 from machine import Pin, time_pulse_us
 from time import sleep_ms, sleep_us
 
+## Check whether argument(s) were provided
+if len(sys.argv) > 1:
+    sampleRate = sys.argv[1]
+    debug = sys.argv[2]
+
+## Initialize Variables
+# Define signal lists
 bitDecode = []
-calibrateThreshold = True
-handshakeLimit = 5
-pulseThreshold = 25
-dataPin = Pin(20)
 bytesOut = []
 
+# Define boolean config settings
+debug = False
+calibrateThreshold = True
+
+# Initialize hardware pin GC20
+dataPin = Pin(20)
+
+# Define integer config settings
+handshakeLimit = 5
+pulseThreshold = 25
+dataPoints = 50
+baroOffset = 13        # Measured delta w/ 2nd "true" sensor @ 50% RH
+tempOffset = -0.7
+samplePeriod = 500     # Sample period in [ms]
+
+#if sys.argv[1]:
+#    samplePeriod = 1 // sampleRate     # Sample rate in [Hz] == 1/500ms # type:ignore
 
 def dht11Start(handshakeFailed):
 
@@ -32,7 +54,7 @@ def dht11Start(handshakeFailed):
     if handshakeResponseA == -1 or handshakeResponseB == -1 :
         print("Handshake failed ", handshakeFailed + 1, "times, retrying ", handshakeLimit, "times")
     
-        if handshakeFailed < 5 and handshakeResponseA is None or handshakeResponseB is None:
+        if handshakeFailed < 5:# and handshakeResponseA is None or handshakeResponseB is None:
             handshakeFailed += 1
             sleep_ms(1000)
             dht11Start(handshakeFailed)
@@ -61,18 +83,20 @@ def dht11Start(handshakeFailed):
         bytesOut.append(byte)
 
     thresholdError = readFail / max(readSuccess, 1)
-    print("Read threshold error (%): " , 100*thresholdError, "\n", "Bits read successfully: ", readSuccess, "\n", "Bits failed to read: ", readFail, "\n", sep="")
+    if debug == True:
+        print("Read threshold error (%): " , 100*thresholdError, "\n", "Bits read successfully: ", readSuccess, "\n", "Bits failed to read: ", readFail, "\n", sep="")
 
     return bytesOut
 
-while True:
+for point in range(dataPoints):
     
     bytesOut = dht11Start(0)
 
-    print(f"Humidity integral (R%): ", bytesOut[0], "\n")
-    print(f"Humidity decimal (R%): ", bytesOut[1], "\n")
-    print(f"Temperature integral (C): ", bytesOut[2], "\n")
-    print(f"Temperature decimal (C): ", bytesOut[3], "\n")
-    print("Checksum: ", bytesOut[0] + bytesOut[1] + bytesOut[2] + bytesOut[3] == bytesOut[4])
+    print(
+        f"{bytesOut[0]},",
+        f"{bytesOut[1]},",
+        f"{bytesOut[2]},",
+        f"{bytesOut[3]},",
+        f"{bytesOut[0] + bytesOut[1] + bytesOut[2] + bytesOut[3] == bytesOut[4]}")
 
-    sleep_ms(1000)
+    sleep_ms(samplePeriod)
