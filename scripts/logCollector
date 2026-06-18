@@ -192,17 +192,6 @@
             fi 
         }
 
-    ## Create Files, Directories, and User Configuration:
-
-		[ ! -d $rootfolder ] && mkdir "$rootfolder";
-		[ ! -d $rootfolder/sub1/ ] && mkdir "${rootfolder}/sub1/";
-        [ ! -d $rootfolder/sub2/ ] && mkdir "${rootfolder}/sub2/";
-		[ ! -f ${rootfolder}/help ] && { touch ${rootfolder}/help; echo 'Please move the downloaded help file to ~/${rootFolder}/' > ${rootfolder}/help; }
-		
-		for file in $fileList; do
-		    [ ! -f ${rootfolder}/${file} ] && { touch ${rootfolder}/${file}; }; # prtclr "Creating file ${rootfolder}/${file}" "$clrqit" "x" "x" "q"; sleep 1; };
-		done
-
 ## Pre-execution:
 
     ## Parse input for tasks:
@@ -250,23 +239,14 @@
 ## Functional Script:
     ## Available functions: boottime(), ckconnect(), prtclr(), ntssh(), ctssh(), ntbash(), countdown(), dyncheck()
     
-    ## Discover Connections
-            dyncheck "1" "1" "1" "$C1"; [[ $nodetect = 0 ]] && vcl="$C1"
-            if [[ $nodetect = 1 ]]; then
-                dyncheck "1" "1" "1" "$W1"; [[ $nodetect = 0 ]] && vcl="$W1"
-            fi
 rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
-echo $rootFolder; sleep 1;
 sensors=(imu dht11);
 scripts=(${rootFolder}/scripts/mpuData.py ${rootFolder}/scripts/dht11Data.py);
-echo ${scripts}; sleep 1;
+echo ${scripts[@]}; sleep 1;
 
 [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
-ls -la | grep -i logs;
-logFolder=$(echo $?);
-echo $logFolder; sleep 1000;
+ls -la | grep -i logs; logFolder=$(echo $?);
 [[ ${logFolder} == 0 ]] || mkdir -p logs;
-sleep 1000;
 
 for i in "${!sensors[@]}"; do
     LOG=logs/"${sensors[$i]}"_$(date +%Y%m%d_%H%M%S).csv;
