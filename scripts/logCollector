@@ -3,9 +3,20 @@
     start=$(date +%s.%N)
     version=1.00;
 
-    prsopt1="1"; keyword1="option1"; task1="task_1";
-    prsopt2="2"; keyword2="option2"; task2="task_2";
-    prsoptn="n"; keyword3="optionn"; taskn="task_n";
+## This is 
+## User Input: 
+
+    ## Folder and Storage:
+
+        rootfolder="$HOME/Engineering/Python/VSCode/sensorData/";
+        sub1="${rootfolder}/scripts";
+        sub2="${rootfolder}/logs";
+        
+    ## Parsing Options:
+
+        prsopt1="1"; keyword1="option1"; task1="task_1";
+        prsopt2="2"; keyword2="option2"; task2="task_2";
+        prsoptn="n"; keyword3="optionn"; taskn="task_n";
 
     ## Configuration Options:    
 
