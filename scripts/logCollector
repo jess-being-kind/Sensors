@@ -124,11 +124,11 @@
     
     rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
     scripts=(${rootFolder}/scripts/mpuData.py ${rootFolder}/scripts/dht11Data.py);
-    echo ${scripts[@]}; sleep 1;
-
+    
     [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
     mkdir -p logs;
 
+    prtclr "Sensors to sample: ${sensors[@]}" "$clrnom" "n";
     prtclr "# samples to record: ${samplesRecorded}" "$clrstd" "n";
     prtclr "Sample frequency: ${frequencySamples}Hz" "$clrstd" "n";
 
@@ -139,13 +139,14 @@
         LOG="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
 
         cfg="$(mktemp)"
+
         {
-            echo "collectData" = 1;
-            echo "samplesRecorded = ${samplesRecorded}"
-            echo "frequencySamples = ${frequencySamples}"
+            printf 'collectData="%s"\n' "${collectData}"
+            printf 'samplesRecorded=%s\n' "${samplesRecorded}"
+            printf 'frequencySamples=%s\n' "${frequencySamples}"
         } > "$cfg"
 
-        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz"
+        cat "$cfg"        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz"
 
         mpremote connect /dev/ttyACM0 \
             fs cp "$cfg" :run_config.py + \
@@ -154,9 +155,8 @@
         rm "$cfg"
     done
 
-    if [[ $debug == "True" ]]; do
+    [[ $debug == "True" ]] && {
         prtclr "$start" "$clrstd";
-        prtclr "$version";
-
-    done
-
+        prtclr "$version" "$clrstd";
+        prtclr "$sensors";
+    }
