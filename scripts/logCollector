@@ -3,15 +3,16 @@
     start=$(date +%s.%N)
     version=1.00;
 
-    prsopt1="1"; keyword1="option1"; task1="task_1";
-    prsopt2="2"; keyword2="option2"; task2="task_2";
-    prsoptn="n"; keyword3="optionn"; taskn="task_n";
+    prsopt1="s"; keyword1="samples";
+    prsopt2="f"; keyword2="frequency";
+    prsopt3="i"; keyword3="interface";
+    prsopt4="d"; keyword4="debug";
 
-    ## Configuration Options:    
+## Configuration Options:    
 
 ## Preamble:
     ## Install Dependencies
-        dpkg -s fping > /dev/null 2>&1 || { echo "Installing package fping, please verify user passphrase:"; sudo apt-get update && sudo apt-get install fping; };
+    
         dpkg -s terminator > /dev/null 2>&1 || { echo "Installing package terminator, please verify user passphrase:"; sudo apt-get install terminator; };
 
     ## Define Variables
@@ -27,11 +28,6 @@
             current=$(date +%s.%N);
             out="$(echo "$current - $start" | bc | awk '{printf "%.3f", $0}')"
             echo $out;
-        }
-
-        ckconnect () {  # Check connection status to IPt
-            fping -t $2 -c 1 $1 > /dev/null 2>&1
-            echo $?
         }
 
         prtclr () {  # Print-to-terminal w/ various arguments                     # Input 1 = Text to print
@@ -82,138 +78,36 @@
             done
         }
 
-        dyncheck () {   # Dynamically check for remote host                                             # Input 1 = Timeout [s]
-            [[ ! -z ${4+x} ]] && vcl=$4;                                                                # Input 2 = Interval between pings [s]
-            run="1"; timeout=$(($1)); wait=$2; quiet=$3; t="0";                                         # Input 3 = Ouput quiet? 0 = False, 1 = True (do not print)
-                while [[ $run = "1" ]] && [[ $t -lt $timeout ]]; do                                     # Input 4 = Remote host ID (usually use $vcl or SSH IP-Addresses)
-                    e2e=$(ckconnect "$vcl" "100");
-                    [[ $t -ge "60" ]] && wait="10";
-                   if [[ ! $e2e = "0" ]]; then
-                       t=$((t+$wait)); prtclr "Waiting for $vcl - Timeout ${t}/${timeout} Seconds..." "$clrqit" "x" "x" "q"; sleep $wait;
-                   else
-                       run="0"; [[ $quiet = "0" ]] && prtclr "Host Detected" "$clrnom" "x" "x" "n";
-                   fi
-                done
-            [[ $run = "1" ]] && nodetect=1 || nodetect=0;
-        }
-
-        makeconfig () {
-            if [ ! -f $rootfolder/config ]; then
-                touch $rootfolder/config;
-                
-                prtclr "Customize user configuration? (y/n)" "256";
-                read customize; ! [[ $customize = "y" || $customize = "n" ]] && { prtclr "Warning: Spurious input, applying default settings" "220"; customize="n"; }
-                
-                if ! [[ $customize = "y" ]]; then                                                   # Default configuration settings
-                    
-                    echo "Version: $version" > $rootfolder/config;
-                    echo "User Configuration File:" >> $rootfolder/config;
-                    echo "standout_color: 256" >> $rootfolder/config;
-                    echo "warn_color: 220" >> $rootfolder/config;
-                    echo "error_color: 196" >> $rootfolder/config;
-                    echo "nominal_color: 114" >> $rootfolder/config;
-                    echo "quiet_color: 37" >> $rootfolder/config;
-                    prtclr "Enter user email: " "256";
-                    read user; echo "user: $user" >> $rootfolder/config;
-                    prtclr "Default Text Colors:" "256"
-                    prtclr "Status Report:" "256"; prtclr "Warning: Oil Temp Hot" "220";
-                    prtclr "Error: Hull Breach Detected" "196"; prtclr "All Systems Nominal" "47";
-                    countdown "3" "down"; echo
-                    
-                else
-                    
-                    echo "Please configure custom user options: "; echo;
-                    
-                    verify="n";
-                    while [[ $verify = "n" ]]; do
-                        echo "Version: $version" > $rootfolder/config;
-                        echo "User Configuration File:" >> $rootfolder/config;
-                        
-                        ## Text Color ##
-                        printable_colours=256
-                        
-                        echo
-                        prtblk 16 231 6 6 3 # The bulk of colours are between 16 and 231 inclusive
-                        prtblk 232 255 12 2 1 # Not 50, but 24 Shades of Grey
-                        prtclr "256" "256";
-                        echo;
-                        
-                        prtclr "Prompting text color? (0-255)" "256";
-                        read clrstd && echo "standout_color: $clrstd" >> $rootfolder/config;
-                        
-                        prtclr "Warning text color? (0-255)" "$clrstd"
-                        read clrwrn && echo "warn_color: $clrwrn" >> $rootfolder/config;
-                        
-                        prtclr "Error text color? (0-255)" "$clrstd"
-                        read clrerr && echo "error_color: $clrerr" >> $rootfolder/config;
-                        
-                        prtclr "Nominal text color? (0-255)" "$clrstd"
-                        read clrnom && echo "nominal_color: $clrnom" >> $rootfolder/config;
-                        
-                        prtclr "Quiet text color? (0-255)" "$clrstd"
-                        read clrqit && echo "quiet_color: $clrqit" >> $rootfolder/config;
-                        
-                        echo
-                        prtclr "Status Report:" "$clrstd"; prtclr "Warning: Oil Temp Hot" "$clrwrn";
-                        prtclr "Error: Hull Breach Detected" "$clrerr"; prtclr "All Systems Nominal" "$clrnom"; prtclr "Quiet: They'll Hear You" "$clrqit";
-                        echo
-                        echo "Text Colors Okay? (y/n): "
-                        read verify; ! [[ $verify = "y" || $verify = "n" ]] && { prtclr "Warning: spurious config input" "$clrwrn"; verify="n"; }; echo "verify: $verify" >> $rootfolder/config;                        
-                    
-                    done
-                    
-                    prtclr "Option 1 ()" "$clrstd"
-                    read option1; ! [[ $option1 = "1" || $thold = "2" ]] && { prtclr "Warning: spurious config input. Defaulting to 2" "$clrwrn"; thold="2"; }; echo "option_1: $option1" >> $rootfolder/config;
-                    
-                    prtclr "User configuration saved in $rootfolder..." "$clrnom";
-                    sleep 1;
-                fi   
-            else  
-                checksum=$(sed -n 's/Version: //p' $rootfolder/config);
-
-                ! [[ $checksum = $version ]] && ( rm $rootfolder/config; echo "Updating user config file..."; sleep 2; makeconfig );
-                
-                clrstd=$(sed -n 's/standout_color: //p' $rootfolder/config);
-                clrwrn=$(sed -n 's/warn_color: //p' $rootfolder/config);
-                clrerr=$(sed -n 's/error_color: //p' $rootfolder/config);
-                clrnom=$(sed -n 's/nominal_color: //p' $rootfolder/config);
-                clrqit=$(sed -n 's/quiet_color: //p' $rootfolder/config);
-            fi 
-        }
-
 ## Pre-execution:
 
     ## Parse input for tasks:
-        while [[ $# > 0 ]]; do
+        while (( $# > 0 )); do
             case "$1" in
                 
                 -$prsopt1|--$keyword1)
-                    option+=" $task1"
-                    v1+="$2"
+                    option+=" $keyword1";
+                    samplesRecorded+="$2";
                     shift
                     { texe+="1"; optname+=' task1'; };
                 ;;
 
                 -$prsopt2|--$keyword2)
-                    option+=" $task2"
-                    v2+="$2"
+                    option+=" $keyword2";
+                    frequencySamples+="$2";
                     shift
                     { texe+="1"; optname+=' task2'; };
                 ;;
 
-                --config)
-                    rm $rootfolder/config;
-                    makeconfig
-                    netID+="0"
-                    skipscp="1"
-                    exit
-                ;;
-                
-                -i)
-                    netID+="$2"
+                -$prsopt3|--$keyword3)
+                    sensors+="$2";
                     shift
                 ;;
                 
+                -$prsopt4|--$keyword4)
+                    debug="True";
+                    shift;
+                ;;
+
                 -h|--help|*)
                     echo $1;
                     cat $rootfolder/help;
@@ -228,22 +122,41 @@
 ## Functional Script:
     ## Available functions: boottime(), ckconnect(), prtclr(), ntssh(), ctssh(), ntbash(), countdown(), dyncheck()
     
-rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
-sensors=(imu dht11);
-scripts=(${rootFolder}/scripts/mpuData.py ${rootFolder}/scripts/dht11Data.py);
-echo ${scripts[@]}; sleep 1;
+    rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
+    scripts=(${rootFolder}/scripts/mpuData.py ${rootFolder}/scripts/dht11Data.py);
+    echo ${scripts[@]}; sleep 1;
 
-[[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
-ls -la | grep -i logs; logFolder=$(echo $?);
-[[ ${logFolder} == 0 ]] || mkdir -p logs;
+    [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
+    mkdir -p logs;
 
-for i in "${!sensors[@]}"; do
-    LOG=logs/"${sensors[$i]}"_$(date +%Y%m%d_%H%M%S).csv;
-    echo "Logging to $LOG";
-    ls -la logs/;
+    prtclr "# samples to record: ${samplesRecorded}" "$clrstd" "n";
+    prtclr "Sample frequency: ${frequencySamples}Hz" "$clrstd" "n";
 
-    sensor="${sensors[$i]}";
-    script="${scripts[$i]}";
 
-    mpremote connect /dev/ttyACM0 run "$script" | tee -a "$LOG";
-done
+    for i in "${!sensors[@]}"; do
+        sensor="${sensors[$i]}"
+        script="${scripts[$i]}"
+        LOG="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
+
+        cfg="$(mktemp)"
+        {
+            echo "collectData" = 1;
+            echo "samplesRecorded = ${samplesRecorded}"
+            echo "frequencySamples = ${frequencySamples}"
+        } > "$cfg"
+
+        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz"
+
+        mpremote connect /dev/ttyACM0 \
+            fs cp "$cfg" :run_config.py + \
+            run "$script" | tee -a "$LOG"
+
+        rm "$cfg"
+    done
+
+    if [[ $debug == "True" ]]; do
+        prtclr "$start" "$clrstd";
+        prtclr "$version";
+
+    done
+
