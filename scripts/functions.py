@@ -9,3 +9,4 @@ def s16(high_byte, low_byte):
         value -= 0x10000
 
     return value
+

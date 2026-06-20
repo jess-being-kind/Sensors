@@ -1,12 +1,11 @@
 #!/bin/bash
     shopt -s extglob
+    set -o pipefail
     start=$(date +%s.%N)
     version=1.00;
 
-    prsopt1="s"; keyword1="samples";
-    prsopt2="f"; keyword2="frequency";
-    prsopt3="i"; keyword3="interface";
-    prsopt4="d"; keyword4="debug";
+    prsopts=("s" "f" "i" "d" "a");
+    keywords=("samples" "frequency" "interface" "debug" "analyze");
 
 ## Configuration Options:    
 
@@ -16,12 +15,17 @@
         dpkg -s terminator > /dev/null 2>&1 || { echo "Installing package terminator, please verify user passphrase:"; sudo apt-get install terminator; };
 
     ## Define Variables
-        b='tput setaf 0'; r='tput setaf 1'; g='tput setaf 2';   # Bash tput colors - black | red | green
-        y='tput setaf 3'; u='tput setaf 4'; m='tput setaf 5';   # Bash tput colors - yellow | blue | magenta
-        c='tput setaf 6'; w='tput setaf 7'; s='tput sgr0';      # Bash tput colors - cyan | white | default
+      
+        s='tput sgr0';                                          # Bash tput colors - default
         d='tput bold'; chnm='^[0-9]+$';                         # Bash tput input - bold | check_for_number
         clrstd=256; clrwrn=214; clrerr=196;                             # prtclr color input - standard | warning | error
         clrnom=113; clrqit=69; user=""    								# prtclr color input - nominal | quiet | user_email
+
+        
+        rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
+        [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
+        mkdir -p logs;
+
 
     ## Define Functions
         boottime () {   # Time since script start
@@ -54,15 +58,18 @@
                     ;;
                 esac
 
-                if [[ $2 -lt 256 ]] && [[ $2 -ge 0 ]]; then     # Check for color input
-                    local outclr=$(echo -e -n "\e[38;5;${2}m${outstatus}${1}");
+                local color="${2:-}"
+
+                if [[ "$color" =~ ^[0-9]+$ ]] && (( color >= 0 && color < 256 )); then
+                    local outclr
+                    outclr=$(echo -e -n "\e[38;5;${color}m${outstatus}${1}")
                 else
-                    tput sgr0;                                  # No color input
-                    local outclr=$(echo -e -n "${outstatus}${1}");
+                    local outclr
+                    outclr=$(echo -e -n "${outstatus}${1}")
                 fi
 
             $prtout "$outclr";                                  # $prtout is the print-method (printf or echo). $outclr is the concatenated message with color applied
-            tput sgr0;                                          # Set the terminal output back to default
+            $s;                                          # Set the terminal output back to default
         }
 
         ntbash () { # New terminal bash command                                                         # Input 1 = "<Command to run>"
@@ -84,33 +91,43 @@
         while (( $# > 0 )); do
             case "$1" in
                 
-                -$prsopt1|--$keyword1)
-                    option+=" $keyword1";
+                -${prsopts[0]}|--${keywords[0]})
+                    prsact+=" ${prsopts[0]}"
+                    option+=" ${keywords[0]}";
                     samplesRecorded+="$2";
                     shift
                     { texe+="1"; optname+=' task1'; };
                 ;;
 
-                -$prsopt2|--$keyword2)
-                    option+=" $keyword2";
+                -${prsopts[1]}|--${keywords[1]})
+                    prsact+=" ${prsopts[1]}";
+                    option+=" ${keywords[1]}";
                     frequencySamples+="$2";
                     shift
                     { texe+="1"; optname+=' task2'; };
                 ;;
 
-                -$prsopt3|--$keyword3)
-                    sensors+="$2";
+                -${prsopts[2]}|--${keywords[2]})
+                    prsact+=" ${prsopts[2]}";
+                    sensor_arg="${2//,/ }"        # allow "imu,dht11" too
+                    read -r -a newSensors <<< "$sensor_arg"
+                    sensors+=("${newSensors[@]}")
                     shift
                 ;;
                 
-                -$prsopt4|--$keyword4)
+                -${prsopts[3]}|--${keywords[3]})
+                    prsact+=" ${prsopts[3]}";
                     debug="True";
-                    shift;
                 ;;
 
-                -h|--help|*)
+                -${prsopts[4]}|--${keywords[4]})
+                    prsact+=" ${prsopts[4]}";
+                    analysis="True";
+                ;;
+
+                -h|--help)
                     echo $1;
-                    cat $rootfolder/help;
+                    cat ${rootFolder}/help;
                     echo
                     exit
                 ;;
@@ -122,41 +139,77 @@
 ## Functional Script:
     ## Available functions: boottime(), ckconnect(), prtclr(), ntssh(), ctssh(), ntbash(), countdown(), dyncheck()
     
-    rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
-    scripts=(${rootFolder}/scripts/mpuData.py ${rootFolder}/scripts/dht11Data.py);
-    
-    [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
-    mkdir -p logs;
+    picoSerial="/dev/ttyACM0";
+    validSensors=(imu dht11 sr04);
 
+    declare -A script2Sensor;
+    script2Sensor[imu]="${rootFolder}/scripts/mpuData.py";
+    script2Sensor[dht11]="${rootFolder}/scripts/dht11Data.py";
+    script2Sensor[sr04]="${rootFolder}/scripts/sr04Data.py";
+        
     prtclr "Sensors to sample: ${sensors[@]}" "$clrnom" "n";
     prtclr "# samples to record: ${samplesRecorded}" "$clrstd" "n";
     prtclr "Sample frequency: ${frequencySamples}Hz" "$clrstd" "n";
 
+    lsof -t $picoSerial | xargs -r kill || prtclr "No process holding serial port $picoSerial" "$clrwrn" "w";
 
-    for i in "${!sensors[@]}"; do
-        sensor="${sensors[$i]}"
-        script="${scripts[$i]}"
+    for sensor in "${sensors[@]}"; do     
+
+        cfg="$(mktemp)";
+            {
+                printf 'collectData="%s"\n' "$sensor";
+                [[ -n "$samplesRecorded" ]] && printf 'samplesRecorded=%s\n' "${samplesRecorded}"
+                [[ -n "$frequencySamples" ]] && printf 'frequencySamples=%s\n' "${frequencySamples}"
+            } > "$cfg"
+
+            mpremote connect /dev/ttyACM0 fs cp "$cfg" :/run_config.py && \
+            mpremote connect /dev/ttyACM0 fs cat :/run_config.py;
+            rm "$cfg";
+
+        script="${script2Sensor[$sensor]}";
+                    
+            [[ -n "$script" ]] || {
+                prtclr "Unknown sensor '$sensor'. Known sensors: ${!script2Sensor[@]}" "$clrerr" "e"
+                exit 1
+            };
+
+            [[ -f "$script" ]] || {
+                prtclr "Script file does not exist: $script" "$clrerr" "e"
+                exit 1
+            };
+
         LOG="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
+        
+        echo "DEBUG sensor=[$sensor]"
+        echo "DEBUG script=[$script]"
+        ls -l "$script"
+        head -n 5 "$script"
 
-        cfg="$(mktemp)"
-
-        {
-            printf 'collectData="%s"\n' "${collectData}"
-            printf 'samplesRecorded=%s\n' "${samplesRecorded}"
-            printf 'frequencySamples=%s\n' "${frequencySamples}"
-        } > "$cfg"
-
-        cat "$cfg"        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz"
-
-        mpremote connect /dev/ttyACM0 \
-            fs cp "$cfg" :run_config.py + \
-            run "$script" | tee -a "$LOG"
-
-        rm "$cfg"
+        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz";
+        
+        if mpremote connect "$picoSerial" run "$script" 2>&1 | tee -a "$LOG"; then
+            prtclr "Logging successful" "$clrnom" "n"
+        else
+            prtclr "Logging failure" "$clrerr" "e"
+        fi
     done
 
-    [[ $debug == "True" ]] && {
-        prtclr "$start" "$clrstd";
-        prtclr "$version" "$clrstd";
-        prtclr "$sensors";
+    [[ -n $analysis ]] && [[ $analysis == "True" ]] && {
+
+        latest=$(ls -lrt $rootFolder/logs/ | tail -n 1);
+        echo "$latest";
+    
+    }
+ 
+    [[ -n $debug ]] && [[ $debug == "True" ]] && {
+        
+        prtclr "Debug: $debug" "$clrstd" "n";
+        prtclr "Analyze: $analysis" "$clrstd" "n";
+        prtclr "Latest log: $latest" "$clrstd" "n";
+        for i in "${prsact[@]}"; do
+            prtclr "Parse options: ${i}" "$clrstd" "n";
+        done        
+        prtclr "$(boottime)" "$clrstd" "n";
+        prtclr "$version" "$clrstd" "n";
+        prtclr "$sensors" "$clrstd" "n";
     }
