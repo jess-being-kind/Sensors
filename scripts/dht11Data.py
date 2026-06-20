@@ -8,7 +8,7 @@ from time import sleep_ms, sleep_us
 
 try:
     from run_config import samplesRecorded, collectData
-except ImportError:
+excepzt ImportError:
     samplesRecorded = 100
 
 ## Initialize Variables
