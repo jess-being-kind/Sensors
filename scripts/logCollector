@@ -1,215 +1,567 @@
 #!/bin/bash
-    shopt -s extglob
-    set -o pipefail
-    start=$(date +%s.%N)
-    version=1.00;
 
-    prsopts=("s" "f" "i" "d" "a");
-    keywords=("samples" "frequency" "interface" "debug" "analyze");
+# ==============================================================================
+# logCollector
+# ------------------------------------------------------------------------------
+# Purpose:
+#   Collect sensor telemetry from a Raspberry Pi Pico running MicroPython.
+#
+# Operator flow:
+#   1. Configure script paths and sensor mappings
+#   2. Parse operator inputs
+#   3. Validate inputs
+#   4. Preflight Pico serial connection
+#   5. Generate run_config.py per sensor
+#   6. Run sensor extraction scripts through mpremote
+#   7. Save stdout as timestamped CSV logs
+# ===============================================================================
 
-## Configuration Options:    
+shopt -s extglob
+set -o pipefail
 
-## Preamble:
-    ## Install Dependencies
-    
-        dpkg -s terminator > /dev/null 2>&1 || { echo "Installing package terminator, please verify user passphrase:"; sudo apt-get install terminator; };
+start=$(date +%s.%N)
+version=1.10
 
-    ## Define Variables
-      
-        s='tput sgr0';                                          # Bash tput colors - default
-        d='tput bold'; chnm='^[0-9]+$';                         # Bash tput input - bold | check_for_number
-        clrstd=256; clrwrn=214; clrerr=196;                             # prtclr color input - standard | warning | error
-        clrnom=113; clrqit=69; user=""    								# prtclr color input - nominal | quiet | user_email
-
-        
-        rootFolder="$HOME/Engineering/Python/VSCode/sensorData";
-        [[ $(pwd) == $rootFolder ]] || cd "${rootFolder}";
-        mkdir -p logs;
+prsopts=("s" "f" "i" "d" "a")
+keywords=("samples" "frequency" "interface" "debug" "analyze")
 
 
-    ## Define Functions
-        boottime () {   # Time since script start
-            current=$(date +%s.%N);
-            out="$(echo "$current - $start" | bc | awk '{printf "%.3f", $0}')"
-            echo $out;
-        }
+# ==============================================================================
+# Configuration
+# ===============================================================================
 
-        prtclr () {  # Print-to-terminal w/ various arguments                     # Input 1 = Text to print
-                                                                                  # Input 2 = Text color        $t<n,e,w,s>color
-            timestamp=$(boottime);                                                # Input 3 = Message Type      e for error; w for warning; q for quiet; n for nominal; empty for none
-                                                                                  # Input 4 = Bold              Set input "d"
-            [[ $4 = "d" ]] && tput bold;                                          # Input 5 = No extra line     Set input "n" for no extra space
-            [[ $5 = "n" ]] && prtout="printf" || prtout="echo";
-                case $3 in
-                    e)  # Error message
-                        outstatus=$($prtout "ERROR     [$timestamp]   $outclr");
-                    ;;
-                    w)  # Warning message
-                        outstatus=$($prtout "WARNING   [$timestamp]   $outclr");
-                    ;;
-                    q)  # Quiet message
-                        outstatus=$($prtout "QUIET     [$timestamp]   $outclr");
-                    ;;
-                    n)  # Status message
-                        outstatus=$($prtout "STATUS    [$timestamp]   $outclr");
-                    ;;
-                    *)  # All other
-                        outstatus=$($prtout "$outclr");
-                    ;;
-                esac
+rootFolder="$HOME/Engineering/Python/VSCode/sensorData"
+picoSerial="/dev/ttyACM0"
 
-                local color="${2:-}"
+analysis="False"
+debug="False"
 
-                if [[ "$color" =~ ^[0-9]+$ ]] && (( color >= 0 && color < 256 )); then
-                    local outclr
-                    outclr=$(echo -e -n "\e[38;5;${color}m${outstatus}${1}")
-                else
-                    local outclr
-                    outclr=$(echo -e -n "${outstatus}${1}")
-                fi
+sensors=()
+samplesRecorded=""
+frequencySamples=""
 
-            $prtout "$outclr";                                  # $prtout is the print-method (printf or echo). $outclr is the concatenated message with color applied
-            $s;                                          # Set the terminal output back to default
-        }
+# Regex guards
+integerRegex='^[0-9]+$'
+floatRegex='^([0-9]+([.][0-9]*)?|[.][0-9]+)$'
 
-        ntbash () { # New terminal bash command                                                         # Input 1 = "<Command to run>"
-        	terminator -T $title --new-tab -x > /dev/null 2>&1 "sh -c '$1; sleep 20000; exit;';";
-            #gnome-terminal --tab -t $2 -e > /dev/null 2>&1 'sh -c "$1; sleep 20000; exit;"';            # Input 2 = "<terminal_title>"
-        }
+# printc color inputs
+clrstd=256                     # standard / no special color
+clrwrn=214                     # warning
+clrerr=196                     # error
+clrnom=113                     # nominal
+clrqit=69                      # quiet / low-priority status
 
-        countdown () {  # Pause script and terminal-output countdown
-            [[ $2 = "down" ]] && inmt="--" || inmt="++";    # Input 2 = "down", then increment down. Otherwise, count up
-            for (( i = $1; i > -1 && i < 20; i$inmt )); do
-                echo -e -n "\r$i "; echo -e -n "seconds";
-                [[ ! $i = 0 ]] && sleep 1;
-            done
-        }
+user="v.halcyon"
 
-## Pre-execution:
+# Sensor-to-script dispatch table
+declare -A script2Sensor
+script2Sensor[imu]="${rootFolder}/scripts/mpuData.py"
+script2Sensor[dht11]="${rootFolder}/scripts/dht11Data.py"
+script2Sensor[sr04]="${rootFolder}/scripts/sr04Data.py"
 
-    ## Parse input for tasks:
-        while (( $# > 0 )); do
-            case "$1" in
-                
-                -${prsopts[0]}|--${keywords[0]})
-                    prsact+=" ${prsopts[0]}"
-                    option+=" ${keywords[0]}";
-                    samplesRecorded+="$2";
-                    shift
-                    { texe+="1"; optname+=' task1'; };
-                ;;
 
-                -${prsopts[1]}|--${keywords[1]})
-                    prsact+=" ${prsopts[1]}";
-                    option+=" ${keywords[1]}";
-                    frequencySamples+="$2";
-                    shift
-                    { texe+="1"; optname+=' task2'; };
-                ;;
+# ==============================================================================
+# Core Utility Functions
+# ===============================================================================
 
-                -${prsopts[2]}|--${keywords[2]})
-                    prsact+=" ${prsopts[2]}";
-                    sensor_arg="${2//,/ }"        # allow "imu,dht11" too
-                    read -r -a newSensors <<< "$sensor_arg"
-                    sensors+=("${newSensors[@]}")
-                    shift
-                ;;
-                
-                -${prsopts[3]}|--${keywords[3]})
-                    prsact+=" ${prsopts[3]}";
-                    debug="True";
-                ;;
+boottime () {
+    # Return time in seconds since script start.
 
-                -${prsopts[4]}|--${keywords[4]})
-                    prsact+=" ${prsopts[4]}";
-                    analysis="True";
-                ;;
+    local current
+    local out
 
-                -h|--help)
-                    echo $1;
-                    cat ${rootFolder}/help;
-                    echo
-                    exit
-                ;;
-            esac
-            shift   # While there are still input arguments to parse, do:
-            
-        done
+    current=$(date +%s.%N)
+    out="$(echo "$current - $start" | bc | awk '{printf "%.3f", $0}')"
 
-## Functional Script:
-    ## Available functions: boottime(), ckconnect(), prtclr(), ntssh(), ctssh(), ntbash(), countdown(), dyncheck()
-    
-    picoSerial="/dev/ttyACM0";
-    validSensors=(imu dht11 sr04);
+    echo "$out"
+}
 
-    declare -A script2Sensor;
-    script2Sensor[imu]="${rootFolder}/scripts/mpuData.py";
-    script2Sensor[dht11]="${rootFolder}/scripts/dht11Data.py";
-    script2Sensor[sr04]="${rootFolder}/scripts/sr04Data.py";
-        
-    prtclr "Sensors to sample: ${sensors[@]}" "$clrnom" "n";
-    prtclr "# samples to record: ${samplesRecorded}" "$clrstd" "n";
-    prtclr "Sample frequency: ${frequencySamples}Hz" "$clrstd" "n";
 
-    lsof -t $picoSerial | xargs -r kill || prtclr "No process holding serial port $picoSerial" "$clrwrn" "w";
+printc () {
+    # Print-to-terminal with optional status prefix, color, bold, and no-newline.
+    #
+    # Input 1 = Text to print
+    # Input 2 = Text color, 0-255; use 256 for standard output
+    # Input 3 = Message type: e=error, w=warning, q=quiet, n=nominal/status
+    # Input 4 = Bold: set to "d"
+    # Input 5 = No extra line: set to "n"
 
-    for sensor in "${sensors[@]}"; do     
+    local message="${1:-}"
+    local color="${2:-}"
+    local msgType="${3:-}"
+    local bold="${4:-}"
+    local noNewline="${5:-}"
+    local timestamp
+    local outstatus
+    local outclr
 
-        cfg="$(mktemp)";
-            {
-                printf 'collectData="%s"\n' "$sensor";
-                [[ -n "$samplesRecorded" ]] && printf 'samplesRecorded=%s\n' "${samplesRecorded}"
-                [[ -n "$frequencySamples" ]] && printf 'frequencySamples=%s\n' "${frequencySamples}"
-            } > "$cfg"
+    timestamp=$(boottime)
 
-            mpremote connect /dev/ttyACM0 fs cp "$cfg" :/run_config.py && \
-            mpremote connect /dev/ttyACM0 fs cat :/run_config.py;
-            rm "$cfg";
+    [[ "$bold" == "d" ]] && tput bold
 
-        script="${script2Sensor[$sensor]}";
-                    
-            [[ -n "$script" ]] || {
-                prtclr "Unknown sensor '$sensor'. Known sensors: ${!script2Sensor[@]}" "$clrerr" "e"
-                exit 1
-            };
+    case "$msgType" in
+        e)
+            outstatus="ERROR     [$timestamp]   "
+        ;;
 
-            [[ -f "$script" ]] || {
-                prtclr "Script file does not exist: $script" "$clrerr" "e"
-                exit 1
-            };
+        w)
+            outstatus="WARNING   [$timestamp]   "
+        ;;
 
-        LOG="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
-        
-        echo "DEBUG sensor=[$sensor]"
-        echo "DEBUG script=[$script]"
-        ls -l "$script"
-        head -n 5 "$script"
+        q)
+            outstatus="QUIET     [$timestamp]   "
+        ;;
 
-        echo "Logging ${samplesRecorded} samples to ${LOG} @${frequencySamples}Hz";
-        
-        if mpremote connect "$picoSerial" run "$script" 2>&1 | tee -a "$LOG"; then
-            prtclr "Logging successful" "$clrnom" "n"
-        else
-            prtclr "Logging failure" "$clrerr" "e"
+        n)
+            outstatus="STATUS    [$timestamp]   "
+        ;;
+
+        *)
+            outstatus=""
+        ;;
+    esac
+
+    if [[ "$color" =~ ^[0-9]+$ ]] && (( color >= 0 && color < 256 )); then
+        outclr="\e[38;5;${color}m${outstatus}${message}"
+    else
+        outclr="${outstatus}${message}"
+    fi
+
+    if [[ "$noNewline" == "n" ]]; then
+        printf "%b" "$outclr"
+    else
+        echo -e "$outclr"
+    fi
+
+    tput sgr0
+}
+
+
+die () {
+    # Fail out of script with a consistent final error message.
+    # Optional input 1 = message
+    # Optional input 2 = exit code
+
+    local message="${1:-Killing script.}"
+    local exitCode="${2:-1}"
+
+    printc "$message" "$clrerr" "e"
+    exit "$exitCode"
+}
+
+
+is_integer () {
+    [[ "$1" =~ $integerRegex ]]
+}
+
+
+is_float () {
+    [[ "$1" =~ $floatRegex ]]
+}
+
+
+str2double () {
+    # Normalize a numeric string into a decimal value Bash can pass onward.
+    # Bash itself does not do floating point math; awk handles the conversion.
+
+    awk -v x="$1" 'BEGIN { printf "%.6f", x + 0 }'
+}
+
+
+float_gt_zero () {
+    # Return success if input is a float greater than zero.
+
+    awk -v x="$1" 'BEGIN { exit !(x > 0) }'
+}
+
+
+require_option_value () {
+    # Fail if an option is missing its required value.
+    # Input 1 = option name
+    # Input 2 = option value
+
+    local optionName="$1"
+    local optionValue="${2:-}"
+
+    if [[ -z "$optionValue" || "$optionValue" == -* ]]; then
+        die "Option ${optionName} requires a value."
+    fi
+}
+
+
+print_banner () {
+    echo "Initializing script..."
+    sleep 1
+
+    echo "Version: $version"
+    sleep 0.3
+
+    echo "Verifying configuration options..."
+    sleep 0.3
+}
+
+
+ensure_project_path () {
+    if ! [[ "$(pwd)" == "$rootFolder" ]]; then
+        echo "Setting path to ${rootFolder}"
+        sleep 0.3
+
+        cd "$rootFolder" || die "Failed to enter project root: ${rootFolder}"
+    fi
+
+    echo "Checking ${rootFolder}/logs exists..."
+    sleep 0.3
+
+    mkdir -p logs || die "Failed to create logs directory."
+}
+
+
+print_configuration () {
+    echo "Pico Serial Port: ${picoSerial}"
+    echo "Mapping sensor to harnessing script..."
+    sleep 0.3
+
+    printc "Color function defined and nominal..." "$clrqit" "q"
+    sleep 0.3
+}
+
+
+# ==============================================================================
+# Argument Parsing and Validation
+# ===============================================================================
+
+parse_args () {
+    printc "Parsing input for tasks and interfaces" "$clrqit" "q"
+
+    while (( $# > 0 )); do
+        case "$1" in
+            -"${prsopts[0]}"|--"${keywords[0]}")
+                require_option_value "$1" "${2:-}"
+
+                option+=" ${keywords[0]}"
+                samplesRecorded="$2"
+
+                shift
+            ;;
+
+            -"${prsopts[1]}"|--"${keywords[1]}")
+                require_option_value "$1" "${2:-}"
+
+                option+=" ${keywords[1]}"
+                frequencySamples="$2"
+
+                shift
+            ;;
+
+            -"${prsopts[2]}"|"--${keywords[2]}")
+                require_option_value "$1" "${2:-}"
+
+                local sensor_arg
+                local newSensors
+
+                sensor_arg="${2//,/ }"        # allow "imu,dht11" too
+                read -r -a newSensors <<< "$sensor_arg"
+
+                sensors+=("${newSensors[@]}")
+
+                shift
+            ;;
+
+            -"${prsopts[3]}"|--"${keywords[3]}")
+                debug="True"
+            ;;
+
+            -"${prsopts[4]}"|--"${keywords[4]}")
+                analysis="True"
+            ;;
+
+            -h|--help)
+                echo "$1"
+                cat "${rootFolder}"/help
+                echo
+                exit 0
+            ;;
+
+            *)
+                die "Unknown option: $1"
+            ;;
+        esac
+
+        shift
+    done
+}
+
+
+validate_inputs () {
+    printc "Input options parsed" "$clrqit" "q"
+    sleep 0.3
+
+    if (( ${#sensors[@]} == 0 )); then
+        die "No sensors selected. Use -i \"imu dht11\""
+    fi
+
+    if [[ -z "$samplesRecorded" ]]; then
+        die "No sample count provided. Use -s <samples>"
+    fi
+
+    if ! is_integer "$samplesRecorded"; then
+        die "Sample count must be an integer. Got: $samplesRecorded"
+    fi
+
+    samplesRecorded=$(( samplesRecorded ))
+
+    if (( samplesRecorded <= 0 )); then
+        die "Sample count must be greater than zero. Got: $samplesRecorded"
+    fi
+
+    if [[ -n "$frequencySamples" ]]; then
+        if ! is_float "$frequencySamples"; then
+            die "Sample frequency must be numeric. Got: $frequencySamples"
+        fi
+
+        if ! float_gt_zero "$frequencySamples"; then
+            die "Sample frequency must be greater than zero. Got: $frequencySamples"
+        fi
+
+        frequencySamples="$(str2double "$frequencySamples")"
+    fi
+
+    for sensor in "${sensors[@]}"; do
+        if [[ -z "${script2Sensor[$sensor]}" ]]; then
+            die "Unknown sensor '$sensor'. Known sensors: ${!script2Sensor[*]}"
         fi
     done
+}
 
-    [[ -n $analysis ]] && [[ $analysis == "True" ]] && {
 
-        latest=$(ls -lrt $rootFolder/logs/ | tail -n 1);
-        echo "$latest";
-    
-    }
- 
-    [[ -n $debug ]] && [[ $debug == "True" ]] && {
-        
-        prtclr "Debug: $debug" "$clrstd" "n";
-        prtclr "Analyze: $analysis" "$clrstd" "n";
-        prtclr "Latest log: $latest" "$clrstd" "n";
-        for i in "${prsact[@]}"; do
-            prtclr "Parse options: ${i}" "$clrstd" "n";
-        done        
-        prtclr "$(boottime)" "$clrstd" "n";
-        prtclr "$version" "$clrstd" "n";
-        prtclr "$sensors" "$clrstd" "n";
-    }
+# ==============================================================================
+# Hardware Preflight
+# ===============================================================================
+
+check_pico_exists () {
+    printc "Checking Pico exists on port ${picoSerial}" "$clrqit" "q"
+    sleep 0.3
+
+    if [[ ! -e "$picoSerial" ]]; then
+        die "Failed to find Pico at port ${picoSerial}. Check cable, BOOTSEL mode, and serial enumeration."
+    fi
+
+    if [[ ! -c "$picoSerial" ]]; then
+        die "${picoSerial} exists, but is not a serial character device."
+    fi
+
+    if [[ ! -r "$picoSerial" || ! -w "$picoSerial" ]]; then
+        die "No read/write permission for ${picoSerial}. Try: sudo usermod -aG dialout \$USER, then log out/back in."
+    fi
+
+    printc "Port located..." "$clrqit" "q"
+    sleep 0.3
+}
+
+
+release_pico_port () {
+    printc "Checking whether another process is holding ${picoSerial}" "$clrqit" "q"
+    sleep 0.3
+
+    mapfile -t portPids < <(lsof -t "$picoSerial" 2>/dev/null)
+
+    if (( ${#portPids[@]} > 0 )); then
+        printc "Killing processes holding ${picoSerial}: ${portPids[*]}" "$clrstd" "n"
+
+        kill "${portPids[@]}" || {
+            die "Failed to release serial port ${picoSerial}"
+        }
+
+        sleep 1
+    else
+        printc "No process holding ${picoSerial}" "$clrqit" "q"
+    fi
+}
+
+
+probe_pico_data_flow () {
+    printc "Testing Pico data flow..." "$clrqit" "q"
+    sleep 0.3
+
+    local probeOut
+    probeOut="$(mktemp)"
+
+    if mpremote connect "$picoSerial" exec "print('pico_ready')" > "$probeOut" 2>&1; then
+        printc "Pico communication probe passed" "$clrnom" "n"
+        rm -f "$probeOut"
+    else
+        printc "Pico exists at ${picoSerial}, but mpremote could not talk to it." "$clrerr" "e"
+        cat "$probeOut"
+        rm -f "$probeOut"
+        die
+    fi
+}
+
+
+preflight_pico () {
+    check_pico_exists
+    release_pico_port
+    probe_pico_data_flow
+}
+
+
+# ==============================================================================
+# Sensor Execution Helpers
+# ===============================================================================
+
+resolve_sensor_frequency () {
+    # Echo the selected frequency for a sensor.
+    # If operator provided -f, use that value; otherwise use sensor-specific default.
+
+    local sensor="$1"
+    local sensorFreq="$frequencySamples"
+
+    if [[ -z "$sensorFreq" ]]; then
+        case "$sensor" in
+            imu)
+                sensorFreq=50
+            ;;
+
+            dht11)
+                sensorFreq=1
+            ;;
+
+            sr04)
+                sensorFreq=10
+            ;;
+
+            *)
+                die "No default frequency for sensor '$sensor'"
+            ;;
+        esac
+    fi
+
+    str2double "$sensorFreq"
+}
+
+
+write_run_config () {
+    # Create a local temporary run_config.py for the current sensor.
+    # Echo the temp file path for the caller.
+
+    local sensor="$1"
+    local sensorFreq="$2"
+    local cfg
+
+    cfg="$(mktemp)"
+
+    {
+        printf 'collectData="%s"\n' "$sensor"
+        printf 'samplesRecorded=%s\n' "$samplesRecorded"
+        printf 'frequencySamples=%s\n' "$sensorFreq"
+    } > "$cfg"
+
+    echo "$cfg"
+}
+
+
+copy_run_config_to_pico () {
+    local cfg="$1"
+
+    if mpremote connect "$picoSerial" fs cp "$cfg" :/run_config.py 2>&1; then
+        [[ "$debug" == "True" ]] && {
+            mpremote connect "$picoSerial" fs cat :/run_config.py
+        }
+    else
+        rm -f "$cfg"
+        die "Failed to copy run_config.py to Pico"
+    fi
+
+    rm -f "$cfg"
+}
+
+
+run_sensor () {
+    local sensor="$1"
+    local script="$2"
+    local sensorFreq="$3"
+    local logFile
+
+    logFile="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
+
+    printc "Running ${sensor} extraction script on Pico..." "$clrqit" "q"
+    sleep 0.3
+
+    printc "Attempting to log ${samplesRecorded} samples to ${logFile} @${sensorFreq}Hz" "$clrnom" "n"
+
+    if mpremote connect "$picoSerial" run "$script" 2>&1 | tee -a "$logFile"; then
+        printc "Logging successful" "$clrnom" "n"
+    else
+        printc "Logger failure" "$clrerr" "e"
+    fi
+}
+
+
+run_sensor_collection () {
+    local sensor
+    local script
+    local sensorFreq
+    local cfg
+
+    for sensor in "${sensors[@]}"; do
+        script="${script2Sensor[$sensor]}"
+
+        [[ -n "$script" ]] || {
+            die "Unknown sensor '$sensor'. Known sensors: ${!script2Sensor[*]}"
+        }
+
+        [[ -f "$script" ]] || {
+            die "Script file does not exist: $script"
+        }
+
+        sensorFreq="$(resolve_sensor_frequency "$sensor")"
+
+        printc "Created unique sensor config file for ${sensor}" "$clrqit" "q"
+        sleep 0.3
+
+        cfg="$(write_run_config "$sensor" "$sensorFreq")"
+        copy_run_config_to_pico "$cfg"
+
+        run_sensor "$sensor" "$script" "$sensorFreq"
+    done
+}
+
+
+# ==============================================================================
+# Analysis and Debug
+# ===============================================================================
+
+run_analysis () {
+    if [[ "$analysis" == "True" ]]; then
+        # python3 "${rootFolder}"/scripts/analyzeData.py
+        echo "analyzing placeholder"
+    fi
+}
+
+
+print_debug () {
+    if [[ "$debug" == "True" ]]; then
+        printc "Execution Time [s]: $(boottime)" "$clrstd" "n"
+        printc "Debug: $debug" "$clrstd" "n"
+        printc "Analyze: $analysis" "$clrstd" "n"
+        printc "Version: $version" "$clrstd" "n"
+        printc "Sensors sampled: ${sensors[*]}" "$clrstd" "n"
+        printc "# samples recorded: ${samplesRecorded}" "$clrstd" "n"
+        printc "Sample frequency argument: ${frequencySamples:-default per sensor}" "$clrstd" "n"
+    fi
+}
+
+
+# ==============================================================================
+# Main Execution
+# ===============================================================================
+
+print_banner
+ensure_project_path
+print_configuration
+parse_args "$@"
+validate_inputs
+preflight_pico
+run_sensor_collection
+run_analysis
+print_debug

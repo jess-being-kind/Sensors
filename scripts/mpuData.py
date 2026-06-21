@@ -22,6 +22,10 @@ except ImportError as e:
 
 print("CONFIG:", collectData, samplesRecorded, frequencySamples)
 
+if frequencySamples < 50:
+    print("Minimum sample frequency: 50Hz")
+    frequencySamples = 50
+
 # Define variables and initialize I2C communication with MPU6050:
 mpu6050 = 0x68  # Hex address for mpu6050
 
@@ -67,7 +71,7 @@ for sample in range(samplesRecorded+calSamples):
         gx += gxI
         gy += gyI
         gz += gzI
-
+        
         sleep(0.01)  # Short delay between readings to avoid overwhelming the sensor
     else:
         if sample == calSamples:
@@ -80,7 +84,8 @@ for sample in range(samplesRecorded+calSamples):
             gzO = (gz // calSamples) #// 131
 
             print(f"Calibration complete. Offsets - Accel: ({axO}, {ayO}, {azO}), Gyro: ({gxO}, {gyO}, {gzO})")
-            
+            print("Samples collected: ", sample)
+
         axC = (axI - axO) / scaleAccel  # Convert to g's for accelerometer
         ayC = (ayI - ayO) / scaleAccel
         azC = (azI - azO) / scaleAccel
