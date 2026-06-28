@@ -142,7 +142,7 @@ die () {
     # Optional input 1 = message
     # Optional input 2 = exit code
 
-    local message="${1:-Killing script.}"
+    local message="${1:-}"
     local exitCode="${2:-1}"
 
     printc "$message" "$clrerr" "e"
@@ -482,12 +482,12 @@ run_sensor () {
     local sensorFreq="$3"
     local logFile
 
-    logFile="logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
+    logFile="${rootFolder}/logs/${sensor}_$(date +%Y%m%d_%H%M%S).csv"
 
     printc "Running ${sensor} extraction script on Pico..." "$clrqit" "q"
     sleep 0.3
 
-    printc "Attempting to log ${samplesRecorded} samples to ${logFile} @${sensorFreq}Hz" "$clrnom" "n"
+    printc "Attempting to log ${samplesRecorded} samples to ${logFile}" "$clrnom" "n"
 
     if mpremote connect "$picoSerial" run "$script" 2>&1 | tee -a "$logFile"; then
         printc "Logging successful" "$clrnom" "n"
@@ -554,14 +554,24 @@ print_debug () {
 
 # ==============================================================================
 # Main Execution
-# ===============================================================================
+# ==============================================================================
 
-print_banner
-ensure_project_path
-print_configuration
-parse_args "$@"
-validate_inputs
-preflight_pico
-run_sensor_collection
-run_analysis
-print_debug
+main () {
+    print_banner
+    ensure_project_path
+    print_configuration
+    parse_args "$@"
+    validate_inputs
+    preflight_pico
+    run_sensor_collection
+    run_analysis
+    print_debug
+}
+
+# ==============================================================================
+# Zero-input behavior
+# ==============================================================================
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
